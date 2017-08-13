@@ -1,0 +1,791 @@
+#include "opencv2/core/core.hpp"
+#include "opencv2/contrib/contrib.hpp"
+#include "opencv2/highgui/highgui.hpp"
+#include "opencv2/core/internal.hpp"
+
+
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <vector>
+#include <algorithm>
+#include <numeric>
+#include <limits.h>
+#include <errno.h>
+
+using namespace cv;
+using namespace std;
+
+
+
+/*
+    Fonction utilisée dans les ajouts de bruits
+    pour avoir toujours des pixels dont les valeurs
+    ne depassent pas 0 et 255
+*/
+inline uchar reduire(int n)
+{
+    n = n>255 ? 255 : n;
+    return n<0 ? 0 : n;
+}
+
+
+/*
+    Ajoute Du bruit gaussien a l'image :
+
+    Cette fonction prend en entrée 3 parametres
+    Le premier evidement sera notre image source
+    le deuxieme sera le premier parametre de la distribution gaussienne (la moyenne)
+    le troisieme sera le deuxieme parametre de la distribution gaussienne (l'ecart-type)
+
+    On teste tout d'abord si l'image est en niveux de gris ou en RGB
+    (les traitement seront presque les memes pour les deux cas)
+
+    On remplit une matrice avec le bruit qui sera generer
+    aleatoirement par une distribution gaussienne
+
+    puis en ajoute cette derniere a notre image source
+    tout en tenant compte que nos pixel ne doivent pas
+    depasser les valeurs 0 et 255
+
+
+*/
+cv::Mat Ajouter_bruit_gaussien(cv::Mat src,float moyenne,float ecart_type)
+{
+    RNG rng;
+    if(src.channels()==1) // Test Si l'image est en niveaux de gris
+    {
+        Mat dst(src.rows,src.cols,CV_8UC1);
+        Mat bruitmat = src.clone();
+        rng.fill(bruitmat,RNG::NORMAL,moyenne,ecart_type);
+        //addWeighted(src, 1.0, bruitmat, 1.0, 0.0, src); peut etre pour un version plus optimisée
+        for (int Rows = 0; Rows < src.rows; Rows++)
+        {
+            for (int Cols = 0; Cols < src.cols; Cols++)
+            {
+                dst.at<uchar>(Rows,Cols)= reduire(src.at<uchar>(Rows,Cols)+bruitmat.at<uchar>(Rows,Cols));
+            }
+        }
+        return dst;
+    }
+    Mat dst(src.rows,src.cols,CV_8UC3); // Si l'image contient 3 couleurs RGB
+    Mat bruitmat = src.clone();
+    rng.fill(bruitmat,RNG::NORMAL,moyenne,ecart_type);
+    //addWeighted(src, 1.0, bruitmat, 1.0, 0.0, src); peut etre pour un version plus optimisée
+    for (int Rows = 0; Rows < src.rows; Rows++)
+    {
+        for (int Cols = 0; Cols < src.cols; Cols++)
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                dst.at<Vec3b>(Rows,Cols).val[i]= reduire(src.at<Vec3b>(Rows,Cols).val[i] + bruitmat.at<Vec3b>(Rows,Cols).val[i]);
+            }
+        }
+    }
+    return dst;
+}
+
+/*
+    Ajout du bruit uniforme :
+
+    Cette fonction prend en entrée 3 parametres
+    Le premier sera notre image source
+    le 2eme et le 3eme seront les parametre de la distribution uniforme (min et max)
+
+
+    Ce sera biensur le meme traitement que pour
+    la distribution gaussienne, la seul difference evidement sera
+    la generation du bruit par une distribution uniforme
+*/
+
+
+cv::Mat Ajouter_bruit_uniforme(cv::Mat src,float mini,float maxi)
+{
+    RNG rng;
+    if(src.channels()==1)
+    {
+        Mat dst(src.rows,src.cols,CV_8UC1);
+        Mat bruitmat = src.clone();
+        rng.fill(bruitmat,RNG::UNIFORM,mini,maxi);
+        //addWeighted(src, 1.0, bruitmat, 1.0, 0.0, src); Pour un version plus optimisée ... decommenter
+        for (int Rows = 0; Rows < src.rows; Rows++)
+        {
+            for (int Cols = 0; Cols < src.cols; Cols++)
+            {
+                dst.at<uchar>(Rows,Cols)= reduire(src.at<uchar>(Rows,Cols)+bruitmat.at<uchar>(Rows,Cols));
+            }
+        }
+        return dst;
+    }
+    Mat dst(src.rows,src.cols,CV_8UC3);
+    Mat bruitmat = src.clone();
+    rng.fill(bruitmat,RNG::UNIFORM,mini,maxi);
+    //addWeighted(src, 1.0, bruitmat, 1.0, 0.0, src); peut etre pour un version plus optimisée
+    for (int Rows = 0; Rows < src.rows; Rows++)
+    {
+        for (int Cols = 0; Cols < src.cols; Cols++)
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                dst.at<Vec3b>(Rows,Cols).val[i]= reduire(src.at<Vec3b>(Rows,Cols).val[i] + bruitmat.at<Vec3b>(Rows,Cols).val[i]);
+            }
+        }
+    }
+    return dst;
+}
+
+/*
+    Ajoute Du bruit Sel et Poivre :
+
+    Cette fonction prend en entrée 3 parametres
+    Le premier sera notre image source
+    le deuxieme sera la quantité de poivre entre 0 et 255
+    le troisieme sera le quantité de sel entre 0 et 255
+
+    on genere une copie de l'image source
+    puis on met des pixels à 0 (resp. 255)
+    aleatoirement par un distribution uniforme
+
+*/
+cv::Mat Ajouter_bruit_sel_poivre(cv::Mat src,float poivre,float sel)
+{
+    sel = 255-sel;
+    if(poivre<0)
+    {
+        poivre = 0;
+    }
+    if(sel>255)
+    {
+        sel = 255;
+    }
+    if(poivre>sel)
+    {
+        poivre = 0;
+        sel = 255;
+    }
+    Mat saltpepper_noise = Mat::zeros(src.rows, src.cols,CV_8U);
+    randu(saltpepper_noise,0,255);
+
+    Mat blanc = saltpepper_noise < poivre;
+    Mat noir = saltpepper_noise > sel;
+
+    Mat saltpepper_img = src.clone();
+    saltpepper_img.setTo(255,blanc);
+    saltpepper_img.setTo(0,noir);
+    return saltpepper_img;
+}
+
+
+/*
+    Dessiner l'histogramme d'une image :
+
+    Un seul parametre sera passer a l'appel de cette
+    fonction qui sera biensur l'image source
+
+    Le traitement verifier d'abord si l'image
+    est en niveaux de gris ou RGB
+
+    On separe d'abord les canaux RGB de l'image
+    puis  pour chaque canal on calcule l'histogramme qui sera mis dans le un vecteur
+    qui sera par la suite dessiné en reliant chaque 2 points
+    sucessifs par une ligne.
+
+    Avant de dessiner biensur l'histogramme une normalisation du vecteur
+    sera necessaire puisque les valeurs de l'histogramme peuvent avoir
+    un tres grande variance, dans cette implementation on utilise la norme
+    min max pour normaliser notre histogramme.
+
+*/
+
+cv::Mat dessiner_histogramme(cv::Mat src)
+{
+    if(src.channels()==1)
+    {
+        int histSize = 256;
+        float range[2]={0,256};
+        const float* histRange = { range };
+
+        Mat gray_hist;
+
+
+
+        calcHist( &src, 1, 0, Mat(), gray_hist, 1, &histSize, &histRange);
+
+        int hist_w = 512; int hist_h = 400;
+        int bin_w = cvRound( (double) hist_w/histSize );
+        Mat histImage( hist_h, hist_w, CV_8UC1, Scalar( 40,40,40) );
+        normalize(gray_hist, gray_hist, 0, histImage.rows, NORM_MINMAX);
+        for( int i = 1; i < histSize; i++ )
+        {
+            line( histImage, Point( bin_w*(i-1), hist_h - cvRound(gray_hist.at<float>(i-1)) ) ,
+            Point( bin_w*(i), hist_h - cvRound(gray_hist.at<float>(i)) ),Scalar( 255, 255, 255));
+        }
+
+        return histImage;
+    }
+    // separation des channels
+    vector<Mat> bgr_planes;
+    split( src, bgr_planes );
+
+    int histSize = 256;
+    float range[2]={0,256};
+    const float* histRange = { range };
+
+    Mat b_hist, g_hist, r_hist;
+
+    /// Calcul d'histogrammes:
+    calcHist( &bgr_planes[0], 1, 0, Mat(), b_hist, 1, &histSize, &histRange);
+    calcHist( &bgr_planes[1], 1, 0, Mat(), g_hist, 1, &histSize, &histRange);
+    calcHist( &bgr_planes[2], 1, 0, Mat(), r_hist, 1, &histSize, &histRange);
+
+    // dessin
+    int hist_w = 512; int hist_h = 400;
+    int bin_w = cvRound( (double) hist_w/histSize );
+
+    Mat histImage( hist_h, hist_w, CV_8UC3, Scalar( 40,40,40) );
+    Mat negativeImage( hist_h, hist_w, CV_8UC3, Scalar( 40,40,40) );
+
+    /// Normalize the result to [ 0, histImage.rows ]
+    normalize(b_hist, b_hist, 0, histImage.rows, NORM_MINMAX);
+    normalize(g_hist, g_hist, 0, histImage.rows, NORM_MINMAX);
+    normalize(r_hist, r_hist, 0, histImage.rows, NORM_MINMAX);
+    /// Draw for each channel
+    for( int i = 1; i < histSize; i++ )
+    {
+        line( histImage, Point( bin_w*(i-1), hist_h - cvRound(b_hist.at<float>(i-1)) ) ,
+        Point( bin_w*(i), hist_h - cvRound(b_hist.at<float>(i)) ),
+        Scalar( 255, 0, 0), 2, 8, 0  );
+        line( histImage, Point( bin_w*(i-1), hist_h - cvRound(g_hist.at<float>(i-1)) ) ,
+        Point( bin_w*(i), hist_h - cvRound(g_hist.at<float>(i)) ),
+        Scalar( 0, 255, 0), 2, 8, 0  );
+        line( histImage, Point( bin_w*(i-1), hist_h - cvRound(r_hist.at<float>(i-1)) ) ,
+        Point( bin_w*(i), hist_h - cvRound(r_hist.at<float>(i)) ),
+        Scalar( 0, 0, 255), 2, 8, 0  );
+
+    }
+
+    return histImage;
+}
+
+
+/*
+    Dessiner l'histogramme d'une image :
+
+    le seul parametre passé sera l'image source
+
+    On appelle la fonction de dessin d'histogramme
+    mais en lui passant comme source le negatif de l'image passé en parametre.
+*/
+cv::Mat dessiner_negatif_histogramme(cv::Mat src)
+{
+    Mat histImage(src.rows,src.cols,CV_8UC3);
+    bitwise_not(src,histImage);
+    return dessiner_histogramme(histImage);
+}
+
+
+/*
+    Transforme Un image RGB en gris
+*/
+
+cv::Mat niveaux_de_gris(cv::Mat src)
+{
+    if(src.channels()==1)
+    {
+        return src;
+    }
+    Mat Gris(src.rows,src.cols,CV_8UC1,Scalar( 0,0,0));
+    for(int i=0;i<src.rows;i++)
+    {
+        for(int j=0;j<src.cols;j++)
+        {
+            Gris.at<uchar>(i,j) = (int)(src.at<Vec3b>(i, j)[0]*0.1140 + src.at<Vec3b>(i, j)[1]*0.5870 + src.at<Vec3b>(i, j)[2]*0.2989);
+        }
+    }
+    return Gris;
+}
+
+
+/*
+    Equalisation de l'histogramme:
+
+    Un seul parametre : image source.
+
+    on passe du RGB au YCrCb et on divise les canaux Y et Cr et Cb
+    puisque l'equalization doit etre faite sur le canal Y de la luminance.
+    on melange les 3 canaux.
+    et on reconverti notre image à la base RGB
+
+*/
+
+cv::Mat equalization_histogramme(cv::Mat src)
+{
+  Mat dst;
+  if(src.channels()!=3)
+  {
+    cvtColor( src, src, CV_BGR2GRAY );
+    equalizeHist( src, dst );
+  }
+  else
+  {
+    vector<Mat> channels;
+    cvtColor(src, dst, CV_BGR2YCrCb);
+    split(dst,channels);
+    equalizeHist(channels[0], channels[0]);
+    merge(channels,dst);
+    cvtColor(dst, dst, CV_YCrCb2BGR); //
+  }
+  return dst;
+}
+
+/*
+    Calcul d'histogramme:
+
+    Prend en argument l'image source
+
+    et retourne un vecteur d'entier contenant les valeur de l'histogramme
+*/
+
+
+vector<int> CalculHist(Mat& image, int x) // 0 1 ou 2 pour x
+{
+    vector<int> result(256);
+    fill(result.begin(),result.end(),0);
+
+    for(int i=0 ; i<image.rows ; i++)
+    {
+        for(int j=0; j<image.cols ;j++)
+        {
+            result[image.at<Vec3b>(i,j).val[x]]++ ;
+        }
+    }
+    return result;
+}
+
+
+
+vector<int> CalculHist(Mat& image)
+{
+
+    vector<int> result(256);
+    fill(result.begin(),result.end(),0);
+
+    for(int i=0 ; i<image.rows ; i++)
+    {
+        for(int j=0; j<image.cols ;j++)
+        {
+            result[image.at<uchar>(i,j)]++ ;
+        }
+    }
+    return result;
+}
+
+/*
+    Fontion qui prend en parametre l'histogramme d'un image
+    et renvoie un entier qui est le seuil otsu pour cette image
+*/
+
+
+int seuillage_otsu(vector<int> histo)
+{
+    int N = std::accumulate(histo.begin(), histo.end(), 0);;
+    int sum =0;
+    int sumB =0;
+    int wB=0;
+    int wF =0;
+    int mB,mF;
+    int maxi=0;
+    int middle;
+    int seuil = 0;
+
+    for(int i=0;i<256;i++)
+    {
+     sum += i*histo[i];
+    }
+
+    for(int i=0;i<256;i++)
+    {
+        wB += histo[i];
+        if(wB == 0)
+        {
+            continue;
+        }
+
+        wF = N-wB;
+        if(wF==0)
+        {
+            continue;
+        }
+        sumB += i*histo[i];
+        mB = sumB/wB;
+        mF = (sum-sumB)/wF;
+        middle = wB*wF*((mB-mF)*(mB-mF));
+        if(middle>maxi)
+        {
+            seuil =i ;
+            maxi = middle;
+        }
+    }
+    return seuil;
+}
+
+
+/*
+    Binarisation de l'image
+
+    fonction qui prend en argument un seuil et l'image source
+    puis renvoie une image binarisée
+*/
+cv::Mat binarisation(int seuil,cv::Mat src)
+{
+    src = niveaux_de_gris(src);
+    for(int i=0;i<src.rows;i++)
+    {
+        for(int j=0;j<src.cols;j++)
+        {
+            src.at<uchar>(i,j) = ((src.at<uchar>(i,j) >= seuil) ? 255:0);
+        }
+    }
+    return src;
+}
+
+/*
+    Binarisation Otsu :
+
+    Binarisation qui se base sur un seuil trouvé par la methode otsu
+*/
+cv::Mat binarisation_otsu(Mat src)
+{
+    return binarisation(seuillage_otsu(CalculHist(src)),src);
+}
+
+/*
+    Segementation d'image:
+
+    Prend en parametre l'image source et un entier K
+
+    le traitement est le suivant :
+
+    on cherche les K pixels les plus dominant dans l'image en utilisant la methodes des K-moyennes
+    et on redessine notre image en utilisant seulement ces K couleurs
+
+    N.B : Cette fonction et apres maintes optimisations prend un temps considerable pour s'executer
+    en fonction du nombre de couleurs K de le segementation et la taille de l'image.
+*/
+
+cv::Mat segmenter_image(Mat src,int k)
+{
+    //int h=src.rows;
+    //int w=src.cols;
+    //cv::resize(src,src,Size((h/2),(w/2)));
+   Mat samples(src.rows * src.cols, 3, CV_32F);
+  for( int y = 0; y < src.rows; y++ )
+    for( int x = 0; x < src.cols; x++ )
+      for( int z = 0; z < 3; z++)
+        samples.at<float>(y + x*src.rows, z) = src.at<Vec3b>(y,x)[z];
+
+
+  int clusterCount = k;
+  Mat labels;
+  int attempts = 2;
+  Mat centers;
+  kmeans(samples, clusterCount, labels, TermCriteria(CV_TERMCRIT_ITER|CV_TERMCRIT_EPS, 5, 0.1), attempts, KMEANS_PP_CENTERS, centers );
+
+
+  Mat new_image( src.size(), src.type() );
+  for( int y = 0; y < src.rows; y++ )
+    for( int x = 0; x < src.cols; x++ )
+    {
+      int cluster_idx = labels.at<int>(y + x*src.rows,0);
+      new_image.at<Vec3b>(y,x)[0] = centers.at<float>(cluster_idx, 0);
+      new_image.at<Vec3b>(y,x)[1] = centers.at<float>(cluster_idx, 1);
+      new_image.at<Vec3b>(y,x)[2] = centers.at<float>(cluster_idx, 2);
+    }
+  //cv::resize(new_image,new_image,Size(w,h));
+  return new_image;
+}
+
+/*
+    Encodage RLE:
+    Prend un vecteur en entrée
+    et renvoie son encodage RLE en vecteur
+*/
+
+vector<int> encode_RLE(vector<int> str)
+{
+
+    vector<int> encoding;
+
+    int count;
+
+    for (int i = 0; i<str.size(); i++)
+    {
+        // count occurrences of character at index i
+        count = 1;
+        while (str[i] == str[i + 1])
+            count++, i++;
+       encoding.push_back(str[i]);
+       encoding.push_back(count);
+
+
+
+    }
+   return encoding;
+}
+
+/*
+    Decodage RLE
+*/
+
+
+vector<int> decode_RLE(vector<int>  str)
+{
+
+    vector<int> decode;
+
+    for (int i = 1; i<str.size(); i=i+2)
+    {
+        for(int j=0;j<str[i];j++)
+        {
+            decode.push_back(str[i-1]);
+        }
+    }
+   return decode;
+}
+
+
+/*
+    Calcul de la transormée en cosinus discrete
+    d'un bloc d'image de taille 8x8
+
+*/
+cv::Mat calculDCT(cv::Mat oo){
+    int i,j;
+    cv::Mat Cosinus(8,8,CV_32F);
+    for(i=0;i<8;i++){
+       for(j=0;j<8;j++){
+           if(i==0){Cosinus.at<float>(i,j)=(1.0/sqrt(8.0));
+           }
+           else {Cosinus.at<float>(i,j)=float((sqrt(2.0/8.0))*cos(((2*(float)(j)+1)*(float)(i)*3.14)/16));}
+
+         }
+
+
+    }
+
+
+    cv::Mat TranspoCosinus(8,8,CV_32F);
+      for(i=0;i<8;i++){
+       for(j=0;j<8;j++){
+           TranspoCosinus.at<float>(i,j)=Cosinus.at<float>(j,i);
+
+         }
+
+    }
+
+    cv::Mat DCT(8,8,CV_32F);
+    DCT=Cosinus*oo*TranspoCosinus;
+    for(i=0;i<8;i++){
+        for(j=0;j<8;j++){
+            DCT.at<float>(i,j)=round((double)(DCT.at<float>(i,j)));
+        }
+    }
+
+   return DCT;
+    }
+
+
+/*
+    Calcul de la transormée en cosinus discrete inverse
+    d'un bloc d'image de taille 8x8
+
+*/
+
+cv::Mat calculiDCT(cv::Mat oo){
+    int i,j;
+    cv::Mat Cosinus(8,8,CV_32F);
+    for(i=0;i<8;i++){
+       for(j=0;j<8;j++){
+           if(i==0){Cosinus.at<float>(i,j)=(1.0/sqrt(8.0));
+           }
+           else {Cosinus.at<float>(i,j)=float((sqrt(2.0/8.0))*cos(((2*(float)(j)+1)*(float)(i)*3.14)/16));}
+
+         }
+
+
+    }
+
+
+    cv::Mat TranspoCosinus(8,8,CV_32F);
+      for(i=0;i<8;i++){
+       for(j=0;j<8;j++){
+           TranspoCosinus.at<float>(i,j)=Cosinus.at<float>(j,i);
+
+         }
+
+    }
+
+    cv::Mat iDCT(8,8,CV_32F);
+    iDCT=TranspoCosinus*oo*Cosinus;
+    for(i=0;i<8;i++){
+        for(j=0;j<8;j++){
+            iDCT.at<float>(i,j)=round((double)(iDCT.at<float>(i,j)));
+        }
+    }
+
+
+   return iDCT;
+    }
+
+
+
+cv::Mat dct_idct(cv::Mat src){ // IMAGE CARREE SEULEMENT ???
+
+    int zz[64]={ 1,2,6,7,15,16,28,29,
+                  3,5,8,14,17,27,30,43,
+                  4,9,13,18,26,31,42,44,
+                  10,12,19,25,32,41,45,54,
+                  11,20,24,33,40,46,53,55,
+                  21,23,34,39,47,52,56,61,
+                  22,35,38,48,51,57,60,62,
+                  36,37,49,50,58,59,63,64};
+
+
+
+
+     float tabb[64]={53,37,33,53,80,133,170,203,
+                    40,40,47,63,87,193,200,183,
+                    47,43,53,80,133,190,230,187,
+                    47,57,73,97,170,290,267,207,
+                    60,73,123,187,227,363,343,257,
+                    80,117,183,213,270,347,377,307,
+                    163,213,260,290,343,403,400,337,
+                    240,307,317,327,373,333,343,330};
+
+
+    long taillereelle=(src.rows)*(src.cols)*8;
+    cv::resize(src,src,cv::Size(512,512));
+
+
+    cv::Mat imagecomp = cv::Mat(src.rows, src.cols, CV_8UC1);
+
+
+    int largeur=src.size().width;
+    int longueur=src.size().height;
+    float block[64]={};
+    int i,j,v,k,l,u;
+    int accu=0;
+
+
+    for(u=0;u<largeur;u+=8){
+        for(v=0;v<longueur;v+=8){
+
+            for(k=0;k<8;k++){
+                for(l=0;l<8;l++){
+
+            block[k*8+l]=src.at<uchar>((u+k),(v+l))-128;
+                }
+            }
+
+
+            cv::Mat img = cv::Mat(8, 8, CV_32F, block);
+            cv::Mat DCT=cv::Mat(8,8,CV_64FC1);
+               //cv::dct(img,DCT);
+            DCT=calculDCT(img);
+            Mat Qantifiee=cv::Mat(8,8,CV_8SC1);
+            for(i=0;i<8;i++){
+                for(j=0;j<8;j++){
+                    Qantifiee.at<char>(i,j)=round((DCT.at<float>(i,j)/tabb[i*8+j]));
+                }
+
+            }
+
+            Mat Qantifiee1=cv::Mat(8,8,CV_32F);
+            for(i=0;i<8;i++){
+                for(j=0;j<8;j++){
+                    Qantifiee1.at<float>(i,j)=Qantifiee.at<char>(i,j)*tabb[i*8+j];
+                }
+            }
+            cv::Mat Decomp=cv::Mat(8,8,CV_32F);
+            //idct(Qantifiee1,Decomp);
+            Decomp=calculiDCT(Qantifiee1);
+            Decomp=Decomp+128;
+
+            int decomp[64]={};
+
+
+
+            for(i=0;i<8;i++){
+                for(j=0;j<8;j++){
+                    decomp[i*8+j]=(round(Decomp.at<float>(i,j)));
+                    if(decomp[i*8+j]>255)
+                    {
+                        decomp[i*8+j]=255;
+                    }
+                    if(decomp[i*8+j]<0){
+                        decomp[i*8+j]=0;
+                    }
+
+                }
+            }
+
+                for(k=0;k<8;k++){
+                    for(l=0;l<8;l++){
+
+               imagecomp.at<uchar>((u+k),(v+l))= decomp[k*8+l];
+                    }
+                }
+
+
+
+    }
+    }
+    return imagecomp;
+}
+
+
+/*
+    Prend en parametre une image source
+    et renvoie une image avec un qualité reduite
+    simulant une compression puis decompression dct d'une image jpeg
+    en prenant en compte si l'image est en RGB ou niveau de gris
+*/
+
+cv::Mat compression_dct(cv::Mat src)
+{
+    if(src.channels()==3)
+    {
+        vector<Mat> planes;
+        split(src,planes);
+        planes[0] = dct_idct(planes[0]);
+        planes[1] = dct_idct(planes[1]);
+        planes[2] = dct_idct(planes[2]);
+        Mat result(src.rows,src.cols,CV_8UC3);
+        merge(planes,result);
+        return result;
+    }
+    else
+    {
+        return dct_idct(src);
+    }
+}
+
+
+
+int main( int argc, char** argv )
+{
+    Mat src = imread("C:/Users/mohammed/Desktop/before.jpg",1); // chemin
+
+    //imshow("Bruit Gaussien",Ajouter_bruit_gaussien(src,0,10));
+    //imshow("Bruit uniforme",Ajouter_bruit_uniforme(src,20,50));
+    //imshow("Bruit sel et poivre",Ajouter_bruit_sel_poivre(src,5,5));
+    //imshow("histogramme",dessiner_histogramme(src));
+    //imshow("Equalization histogramme",equalization_histogramme(src));
+    //imshow("Negatif histogramme",dessiner_negatif_histogramme(src));
+    //imshow("Niveaux de Gris",niveaux_de_gris(src));
+    //imshow("Segmenter image",segmenter_image(src,5));
+    //imshow("Compression DCT",compression_dct(src));
+    imshow("Original ", src);
+    waitKey(0);
+    return 0;
+}
