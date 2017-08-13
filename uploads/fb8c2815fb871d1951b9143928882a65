@@ -1,0 +1,15 @@
+# depslib dependency file v1.0
+1501615483 source:c:\users\mohammed\desktop\opencline\main.cpp
+	"opencv2/core/core.hpp"
+	"opencv2/contrib/contrib.hpp"
+	"opencv2/highgui/highgui.hpp"
+	"opencv2/core/internal.hpp"
+	<iostream>
+	<fstream>
+	<sstream>
+	<vector>
+	<algorithm>
+	<numeric>
+	<limits.h>
+	<errno.h>
+

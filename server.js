@@ -19,9 +19,9 @@ app.get("/", function (request, response) {
 });
 
 app.post("/filesize", upload.single('file'), function (req, res, next) {
-  console.log(req.file.size);
   res.json({
-    
+    name : req.file.originalname.toString(),
+    size : (parseInt(req.file.size)/1024).toFixed(1).toString()+"Ko"
   });
 });
 
